@@ -1,0 +1,4 @@
+# Engine type stubs Claude Code writes into a mod; they track its version.
+.claude-plugin/types/
+node_modules/
+.DS_Store

@@ -1,0 +1,6 @@
+{
+  "name": "wdoc",
+  "version": "0.1.0",
+  "description": "A live working doc per session, shared by you and Claude, in a pane beside the chat",
+  "types": "./types/index.d.ts"
+}
