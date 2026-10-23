@@ -64,7 +64,13 @@ async function refresh($: $) {
   const current = await read($, doc)
   if (!current) return
   const stat = await $.fs.stat(current.path).catch(() => undefined)
-  if (!stat || stat.mtimeMs === current.mtimeMs) return
+  // Gone (removed or renamed): find the session's doc again.
+  if (!stat) {
+    await update($, doc, () => null)
+    await ensureDoc($)
+    return
+  }
+  if (stat.mtimeMs === current.mtimeMs) return
   const fresh = await load($, current.path, current.blank)
   await update($, doc, () => fresh)
 }
