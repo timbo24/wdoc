@@ -32,6 +32,12 @@ const engine = (on: Parameters<Parameters<typeof test>[1]>[1], files: Map<string
   on('session.cwd', () => ({ value: '/work/proj' }))
   on('session.id', () => ({ value: 'abcdef1234567890' }))
   on('fs.exists', (_, e) => ({ value: files.has(e.path) || files.has('*') }))
+  on('fs.list', (_, e) => {
+    const entry = (name: string) => ({ name, kind: 'file' as const, size: 1, mtimeMs: 1, isLink: false })
+    const names = [...files.keys()].filter(k => k.startsWith(`${e.path}/`)).map(k => k.slice(e.path!.length + 1))
+
+    return { value: files.has('*') ? [entry('2026-10-21-abcdef12.md')] : names.map(entry) }
+  })
   on('fs.write', (_, e) => { files.set(e.path, e.text); return { value: undefined } })
   on('fs.read', (_, e) => ({ value: files.get(e.path) ?? files.get('*') ?? '' }))
   on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }))
@@ -91,4 +97,14 @@ test('Claude is told about the doc even if the first prompt beats its creation',
   const section = sections.find(s => s.id === 'wdoc:doc')
   expect(section?.text).toContain('/home/me/Developer/wdoc/proj/')
   expect(section?.text).toContain('"wdoc"')
+})
+
+test('a resumed session reopens its own doc from an earlier day', async ($, on) => {
+  const old = '/home/me/Developer/wdoc/proj/2026-10-23-abcdef12.md'
+  const files = new Map([[old, '# kept\n']])
+  engine(on, files)
+  await $.session.start({ cwd: '/work/proj', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'wdoc', args: 'path' })
+  expect([...files.keys()]).toEqual([old])
+  expect(files.get(old)).toBe('# kept\n')
 })

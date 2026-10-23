@@ -39,9 +39,14 @@ async function ensureDoc($: $): Promise<Doc> {
   const cwd = await $.session.cwd()
   const sid = (await $.session.id()).slice(0, 8)
   const date = await today($)
-  const path = `${await rootDir($)}/${dirName(cwd)}/${date}-${sid}.md`
+  const dir = `${await rootDir($)}/${dirName(cwd)}`
   const blank = `# Working doc: ${dirName(cwd)}\n\n_${date}, session ${sid}_\n\n## Plan\n\n## Notes\n\n## Tests\n\n`
-  if (!(await $.fs.exists(path))) await $.fs.write(path, blank)
+  // A resumed session reopens its own doc, whatever day its name carries.
+  const mine = (await $.fs.list(dir).catch(() => []))
+    .filter(f => f.kind === 'file' && f.name.endsWith(`-${sid}.md`))
+    .sort((x, y) => y.mtimeMs - x.mtimeMs)[0]
+  const path = mine ? `${dir}/${mine.name}` : `${dir}/${date}-${sid}.md`
+  if (!mine) await $.fs.write(path, blank)
   const loaded = await load($, path, blank)
   await update($, doc, () => loaded)
 
