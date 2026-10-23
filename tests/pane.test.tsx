@@ -82,3 +82,13 @@ test('the theme button cycles modes and saves the choice', async ($, on) => {
   expect(await ui.find({ key: 'theme' })).toMatchObject({ props: { label: 'theme: safe' } })
   await ui.unmount()
 })
+
+test('Claude is told about the doc even if the first prompt beats its creation', async ($, on) => {
+  const files = new Map<string, string>()
+  engine(on, files)
+  on('prompt.compose', () => ({ sections: [] }))
+  const { sections } = await $.prompt.compose({ traits: [], model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', tools: [], surfaces: ['terminal'], outputStyle: null })
+  const section = sections.find(s => s.id === 'wdoc:doc')
+  expect(section?.text).toContain('/home/me/Developer/wdoc/proj/')
+  expect(section?.text).toContain('"wdoc"')
+})

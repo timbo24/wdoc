@@ -27,8 +27,9 @@ const rootDir = async ($: $) => `${(await $.env.get('HOME')) ?? '~'}/${ROOT}`
 const dirName = (cwd: string) =>
   (cwd.split('/').filter(Boolean).pop() ?? 'root').replace(/[^\w.-]/g, '_')
 
+// The person's own calendar day (en-CA formats as YYYY-MM-DD), not UTC's.
 const today = async ($: $) =>
-  new Date(await $.clock.now()).toISOString().slice(0, 10)
+  new Date(await $.clock.now()).toLocaleDateString('en-CA')
 
 // The session doc: created as the session starts, its path fixed by working dir, date and session.
 async function ensureDoc($: $): Promise<Doc> {
@@ -61,6 +62,16 @@ async function refresh($: $) {
   if (!stat || stat.mtimeMs === current.mtimeMs) return
   const fresh = await load($, current.path, current.blank)
   await update($, doc, () => fresh)
+}
+
+// A hot reload cancels the old module's timers and runs no session.start, so
+// any hook that runs restarts the watch if this module has none yet.
+let isWatching = false
+function watch($: $) {
+  if (isWatching) return
+  isWatching = true
+  $.clock.every(POLL_MS, () => void refresh($))
+  $.clock.after(0, () => void refresh($))
 }
 
 async function save($: $, text: string) {
@@ -124,7 +135,7 @@ export const register: Register = on => {
       description: 'Open the session working doc (wdoc [close | save <name> | path | theme <mode>])',
       argumentHint: '[close | save <name> | path | theme <color|safe|mono|contrast>]',
     })
-    $.clock.every(POLL_MS, () => void refresh($))
+    watch($)
     void loadTheme($).catch(() => undefined)
     if (e.isInteractive) {
       void prune($).catch(() => undefined).then(() => ensureDoc($))
@@ -147,6 +158,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'wdoc' }, async ($, e) => {
+    watch($)
     const [verb = '', ...rest] = e.args.trim().split(/\s+/)
 
     if (verb === 'close') {
@@ -190,7 +202,11 @@ export const register: Register = on => {
   // Tell Claude the doc exists and how to share it, once it does.
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
-    const current = await read($, doc)
+    watch($)
+    // The doc is made at session start without waiting; a first prompt that
+    // comes sooner makes it here, so Claude is never told nothing.
+    const current = (await read($, doc)) ??
+      (e.traits.includes('print') ? null : await ensureDoc($).catch(() => null))
     if (!current) return result
 
     return {
@@ -201,7 +217,7 @@ export const register: Register = on => {
           scope: 'session',
           text: [
             '# Working doc',
-            `The user and you share a live working doc for this session at ${current.path}, shown to them in a pane beside the chat.`,
+            `The user and you share a live working doc for this session at ${current.path}, shown to them in a pane beside the chat (the wdoc mod; the user may call it "wdoc", "the working doc" or "the doc"). When they ask to put something in it, add it there with the Edit tool. It is this local file, not a Claude Docs doc or an Artifact: never create one of those for it.`,
             'It is markdown, shown as source with light styling (every character visible): headings, lists, `- [ ]` checkboxes, tables (wide ones scroll sideways, so do not squeeze them), bold, italic, code, emoji, and colored text written {red:text} (red, green, yellow, blue, magenta, cyan, orange, purple, pink, gray, or a #hex). Read it before relying on it, since the user edits it too.',
             'It has a ## Plan section: as work proceeds, keep it current with the steps of the work as a checklist, ticking items off as they are done and adding new ones as plans change. Its ## Tests section records what was tested and how, with results. Use ## Notes for decisions and findings. Write an open question for the user as a line starting `Q:`; the pane shows those in yellow, so use them only for questions.',
             'Update it with the Edit tool (prefer small edits over rewrites). Keep it tidy and concise; do not paste long logs into it.',
@@ -223,11 +239,16 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button, Link } = $.ui.resolve(e)
-    const current = await read($, doc)
+    watch($)
+    const saved = await read($, doc)
     const editing = await read($, draft)
 
-    if (!current) return <Text dimColor>No working doc yet. Run /wdoc.</Text>
+    if (!saved) return <Text dimColor>No working doc yet. Run /wdoc.</Text>
 
+    // Drawn from disk when the file moved on since the last refresh, so an edit
+    // shows even if the watch timer is not running.
+    const stat = await $.fs.stat(saved.path).catch(() => undefined)
+    const current = stat && stat.mtimeMs !== saved.mtimeMs ? await load($, saved.path, saved.blank) : saved
     const name = current.path.split('/').pop()
     const mode = await read($, themeName)
 
