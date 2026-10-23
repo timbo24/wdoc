@@ -64,13 +64,7 @@ async function refresh($: $) {
   const current = await read($, doc)
   if (!current) return
   const stat = await $.fs.stat(current.path).catch(() => undefined)
-  // Gone (removed or renamed): find the session's doc again.
-  if (!stat) {
-    await update($, doc, () => null)
-    await ensureDoc($)
-    return
-  }
-  if (stat.mtimeMs === current.mtimeMs) return
+  if (!stat || stat.mtimeMs === current.mtimeMs) return
   const fresh = await load($, current.path, current.blank)
   await update($, doc, () => fresh)
 }
@@ -251,15 +245,11 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button, Link } = $.ui.resolve(e)
     watch($)
-    const saved = await read($, doc)
+    const current = await read($, doc)
     const editing = await read($, draft)
 
-    if (!saved) return <Text dimColor>No working doc yet. Run /wdoc.</Text>
+    if (!current) return <Text dimColor>No working doc yet. Run /wdoc.</Text>
 
-    // Drawn from disk when the file moved on since the last refresh, so an edit
-    // shows even if the watch timer is not running.
-    const stat = await $.fs.stat(saved.path).catch(() => undefined)
-    const current = stat && stat.mtimeMs !== saved.mtimeMs ? await load($, saved.path, saved.blank) : saved
     const name = current.path.split('/').pop()
     const mode = await read($, themeName)
 
